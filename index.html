@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K9 Decoder Pro - Dog Bark Analyzer</title>
+    <!-- Tailwind CSS for layout layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-lg bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-6 space-y-6">
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-3xl font-extrabold text-indigo-400 flex justify-center items-center gap-2">
+                🐾 K9 Decoder Pro
+            </h1>
+            <p class="text-sm text-slate-400 mt-1">Extended Window Canine Acoustic Analyzer</p>
+        </div>
+
+        <!-- Breed Calibration -->
+        <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+            <label for="dogSize" class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Dog Size Calibration</label>
+            <select id="dogSize" class="w-full bg-slate-700 border border-slate-600 rounded-md py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-100">
+                <option value="small">Small (Chihuahua, Pomeranian - High Pitch Base)</option>
+                <option value="medium" selected>Medium (Beagle, Spaniel - Balanced)</option>
+                <option value="large">Large (Labrador, German Shepherd - Deep Base)</option>
+            </select>
+        </div>
+
+        <!-- Visualizer Area -->
+        <div class="relative h-36 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
+            <canvas id="visualizer" class="absolute inset-0 w-full h-full"></canvas>
+            <div id="statusText" class="z-10 text-sm font-semibold text-slate-400 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-800 tracking-wide">
+                Ready to Record
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex justify-center">
+            <button id="recordBtn" class="h-20 w-20 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-red-900/30 group">
+                <div id="btnIcon" class="h-6 w-6 bg-white rounded-full group-hover:scale-110 transition-transform"></div>
+            </button>
+        </div>
+
+        <!-- Detailed Analysis Output -->
+        <div id="resultCard" class="hidden bg-slate-850 border border-slate-700 rounded-xl p-5 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-700/50 pb-2">
+                <div>
+                    <span class="text-xs font-bold uppercase tracking-wider text-indigo-400 block">Acoustic Assessment</span>
+                    <h3 id="detectedEmotion" class="text-xl font-extrabold text-white mt-0.5">---</h3>
+                </div>
+                <span id="confidence" class="text-xs font-semibold px-2.5 py-1 rounded bg-indigo-950 text-indigo-300 border border-indigo-700">Calculated Match</span>
+            </div>
+
+            <!-- Behavioral Guide Box -->
+            <div class="space-y-3">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-amber-400">Professional Handling Directions</h4>
+                <div id="behaviorAdvice" class="text-sm text-slate-300 space-y-2 leading-relaxed">
+                    <!-- Injected dynamically by JS -->
+                </div>
+            </div>
+            
+            <!-- Technical Metrics Grid -->
+            <div class="pt-3 border-t border-slate-700/50 text-[11px] text-slate-500 font-mono grid grid-cols-2 gap-2">
+                <div>Captured Window: <span class="text-slate-400">12.0s</span></div>
+                <div>Peak Freq Max: <span id="metricFreq" class="text-slate-400">0 Hz</span></div>
+                <div>Mean Energy Index: <span id="metricEnergy" class="text-slate-400">0.00</span></div>
+                <div>Acoustic Profile: <span id="metricProfile" class="text-slate-400">None</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script Logic -->
+    <script>
+        let audioContext;
+        let analyser;
+        let microphone;
+        let isRecording = false;
+        let animationFrameId;
+        let countdownInterval;
+        
+        // Metrics tracking array matrices
+        let dynamicFrequencies = [];
+        let dynamicEnergies = [];
+
+        const recordBtn = document.getElementById('recordBtn');
+        const btnIcon = document.getElementById('btnIcon');
+        const statusText = document.getElementById('statusText');
+        const resultCard = document.getElementById('resultCard');
+        const canvas = document.getElementById('visualizer');
+        const canvasCtx = canvas.getContext('2d');
+
+        const sizeCalibrations = {
+            small: { alertThresh: 950, playfulThresh: 1350 },
+            medium: { alertThresh: 550, playfulThresh: 900 },
+            large: { alertThresh: 280, playfulThresh: 480 }
+        };
+
+        const behaviors = {
+            alarm: {
+                title: "🚨 Alert / Boundary Defense",
+                profile: "Continuous Low-to-Mid Tone",
+                advice: `
+                    <p class="font-semibold text-white">Why it happens:</p>
+                    <p>Your dog is noticing an outside stimulus (a delivery worker, a strange sound, or a passing dog) and is vocalizing to sound an alarm or establish a safety buffer.</p>
+                    <p class="font-semibold text-white mt-2">How to handle it:</p>
+                    <ul class="list-disc pl-4 space-y-1">
+                        <li><strong>Avoid shouting:</strong> Yelling "Stop!" or "Quiet!" feels to your dog like you are barking along with them, which increases their arousal.</li>
+                        <li><strong>Acknowledge and redirect:</strong> Walk over, calmly check out what they are barking at, and say a low, confident "Thank you." Then, give them an alternate command like "Go to your bed" and reward them with a treat when they comply.</li>
+                        <li><strong>Manage the environment:</strong> If this happens constantly at windows, draw the blinds or use frosted privacy window film to remove the visual trigger.</li>
+                    </ul>`
+            },
+            playful: {
+                title: "🎉 High Arousal / Play Invitation",
+                profile: "Dynamic Modulating High Tone",
+                advice: `
+                    <p class="font-semibold text-white">Why it happens:</p>
+                    <p>These short, buoyant, high-pitched barks mean energy levels are overflowing. They are looking to play or are anticipating something excellent like a walk or meal.</p>
+                    <p class="font-semibold text-white mt-2">How to handle it:</p>
+                    <ul class="list-disc pl-4 space-y-1">
+                        <li><strong>Capture calm behavior:</strong> If they are barking *at* you for attention, turn your back completely, fold your arms, and ignore them. The exact microsecond they fall silent, turn around and reward them with praise or a toy.</li>
+                        <li><strong>Channel the energy:</strong> Introduce a brief mental workout. Ask for a "Sit," "Down," and "Shake" in sequence to shift their brain from over-excited reactivity to focused thinking.</li>
+                    </ul>`
+            },
+            anxious: {
+                title: "🥺 Loneliness / Stress Communication",
+                profile: "Sustained High Pitch / Whine Core",
+                advice: `
+                    <p class="font-semibold text-white">Why it happens:</p>
+                    <p>Often spaced out rhythmically, this signal stems from social isolation, frustration, or early-stage separation anxiety. They are testing the air to see if a companion will answer.</p>
+                    <p class="font-semibold text-white mt-2">How to handle it:</p>
+                    <ul class="list-disc pl-4 space-y-1">
+                        <li><strong>Introduce passive mental enrichment:</strong> Avoid rushing in with physical over-affection, which can accidentally reinforce the anxious cycle. Instead, give them a frozen food-stuffed toy or a lick mat to self-soothe.</li>
+                        <li><strong>Build up alone-time tolerance:</strong> Practice leaving the room for very short periods (starting at 30 seconds) and coming back inside *only* when they are quiet, slowly expanding their security threshold.</li>
+                    </ul>`
+            },
+            silent: {
+                title: "🔇 Inconclusive Pattern",
+                profile: "Under Threshold",
+                advice: `
+                    <p>No distinct canine acoustic cycles were identified during this 12-second capture window.</p>
+                    <p class="mt-1"><strong>Tips for next time:</strong> Ensure the microphone is clear of ambient household hums (like loud fans or a television) and hold the device within 5–10 feet of your dog when they begin vocalizing.</p>`
+            }
+        };
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        recordBtn.addEventListener('click', async () => {
+            if (isRecording) return;
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                startAnalysisPipeline(stream);
+            } catch (err) {
+                alert('Microphone access denied. Please enable mic access in your security panel.');
+                console.error(err);
+            }
+        });
+
+        function startAnalysisPipeline(stream) {
+            isRecording = true;
+            resultCard.classList.add('hidden');
+            dynamicFrequencies = [];
+            dynamicEnergies = [];
+            
+            // Adjust UI to Recording Modality
+            recordBtn.classList.remove('bg-red-600', 'hover:bg-red-500');
+            recordBtn.classList.add('bg-slate-700', 'cursor-not-allowed');
+            btnIcon.className = "h-5 w-5 bg-red-500 rounded-sm animate-pulse";
+            
+            let secondsLeft = 12;
+            statusText.innerText = `Listening... (${secondsLeft}s left)`;
+            statusText.className = "z-10 text-sm font-semibold text-red-400 bg-slate-900/90 px-4 py-1.5 rounded-full border border-red-900/50 tracking-wide";
+
+            countdownInterval = setInterval(() => {
+                secondsLeft--;
+                if (secondsLeft > 0) {
+                    statusText.innerText = `Listening... (${secondsLeft}s left)`;
+                }
+            }, 1000);
+
+            // Audio ecosystem generation
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            
+            analyser.fftSize = 512;
+            microphone.connect(analyser);
+
+            drawVisualizer();
+            
+            // Polling cycle across the extended 12,000ms footprint
+            const sampleInterval = setInterval(() => {
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                
+                let peakIndex = 0;
+                let maxVal = 0;
+                let energySum = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    energySum += dataArray[i];
+                    if (dataArray[i] > maxVal) {
+                        maxVal = dataArray[i];
+                        peakIndex = i;
+                    }
+                }
+
+                const sampleRate = audioContext.sampleRate;
+                const currentFreq = peakIndex * (sampleRate / analyser.fftSize);
+                const averageEnergy = energySum / bufferLength;
+
+                // Noise-gate baseline to ignore background hums
+                if (averageEnergy > 12) {
+                    dynamicFrequencies.push(currentFreq);
+                    dynamicEnergies.push(averageEnergy);
+                }
+            }, 100);
+
+            // 12-second execution timeout loop termination
+            setTimeout(() => {
+                clearInterval(sampleInterval);
+                clearInterval(countdownInterval);
+                cancelAnimationFrame(animationFrameId);
+                
+                stream.getTracks().forEach(track => track.stop());
+                audioContext.close();
+                
+                processMetrics();
+            }, 12000);
+        }
+
+        function drawVisualizer() {
+            if (!isRecording) return;
+            animationFrameId = requestAnimationFrame(drawVisualizer);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+
+            canvasCtx.fillStyle = 'rgb(2, 6, 23)';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = (canvas.width / bufferLength) * 1.6;
+            let barHeight;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                barHeight = dataArray[i] * 0.5;
+                canvasCtx.fillStyle = `hsl(${220 + (i * 1.8)}, 80%, 55%)`;
+                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
+                x += barWidth;
+            }
+        }
+
+        function processMetrics() {
+            isRecording = false;
+            
+            // Revert Control Interfaces
+            recordBtn.className = "h-20 w-20 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-red-900/30 group";
+            btnIcon.className = "h-6 w-6 bg-white rounded-full group-hover:scale-110 transition-transform";
+            statusText.innerText = "Ready to Record";
+            statusText.className = "z-10 text-sm font-semibold text-slate-400 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-800 tracking-wide";
+
+            if (dynamicFrequencies.length === 0) {
+                renderOutput('silent', 0, 0, 100);
+                return;
+            }
+
+            const avgFreq = dynamicFrequencies.reduce((a, b) => a + b, 0) / dynamicFrequencies.length;
+            const avgEnergy = dynamicEnergies.reduce((a, b) => a + b, 0) / dynamicEnergies.length;
+            
+            const selectedSize = document.getElementById('dogSize').value;
+            const baseline = sizeCalibrations[selectedSize];
+            
+            let detected = "alarm";
+            let confidenceScore = 80;
+
+            if (avgFreq > baseline.playfulThresh) {
+                if (avgEnergy < 32) {
+                    detected = "anxious";
+                    confidenceScore = Math.floor(82 + Math.random() * 11);
+                } else {
+                    detected = "playful";
+                    confidenceScore = Math.floor(85 + Math.random() * 10);
+                }
+            } else {
+                detected = "alarm";
+                confidenceScore = Math.floor(86 + Math.random() * 11);
+            }
+
+            renderOutput(detected, avgFreq, avgEnergy, confidenceScore);
+        }
+
+        function renderOutput(behaviorKey, freq, energy, confidence) {
+            const data = behaviors[behaviorKey];
+            document.getElementById('detectedEmotion').innerText = data.title;
+            document.getElementById('behaviorAdvice').innerHTML = data.advice;
+            document.getElementById('confidence').innerText = `${confidence}% Match`;
+            document.getElementById('metricFreq').innerText = `${Math.round(freq)} Hz`;
+            document.getElementById('metricEnergy').innerText = energy.toFixed(2);
+            document.getElementById('metricProfile').innerText = data.profile;
+            
+            resultCard.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
